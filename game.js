@@ -36,9 +36,14 @@ resized();
 function queueUpdate() {
 	if (queueUpdate.queued) return;
 	queueUpdate.queued = true;
-	window.requestAnimationFrame(function(){
+	window.requestAnimationFrame(function(timestamp){
 		delete queueUpdate.queued;
-		update();
+		if (!('prevTimestamp' in queueUpdate)) {
+			queueUpdate.prevTimestamp = timestamp;
+		}
+		const delta = timestamp = queueUpdate.prevTimestamp;
+		update(delta / 1000.0);
+		queueUpdate.prevTimestamp = timestamp;
 	});
 }
 
@@ -46,12 +51,14 @@ function queueUpdate() {
 
 const BOARD = {
 	grid:[
-		"    ...    ",
-		"...........",
-		"..nothing..",
-		".....   ...",
-		"   ....... ",
-		"    ...    "
+		"             ",
+		"     ...     ",
+		" ........... ",
+		" ..nothing.. ",
+		" .....   ... ",
+		"    .......  ",
+		"     ...     ",
+		"             "
 	]
 };
 
@@ -82,14 +89,124 @@ const CAMERA = {
 	}
 };
 
-function update() {
-	//CAMERA.azimuth = CAMERA.azimuth + 0.01;
-	CAMERA.target.x = 0.5 * BOARD.grid[0].length;
-	CAMERA.target.y = 0.5 * BOARD.grid.length;
+const MOUSE = {
+	at:{x:NaN, y:NaN},
+	grid:{x:NaN, y:NaN}
+};
+
+function setMouse(evt) {
+	const rect = CANVAS.getBoundingClientRect();
+	MOUSE.at = {
+		x:(evt.clientX - rect.left) / rect.width * 2.0 - 1.0,
+		y:(evt.clientY - rect.bottom) / -rect.height * 2.0 - 1.0
+	};
+
+	//solve posn on plane -- raycast from camera:
+	const frame = CAMERA.makeFrame();
+	const fy = Math.tan(0.5 * CAMERA.fovy / 180.0 * Math.PI);
+	const fx = fy * CAMERA.aspect;
+
+	const origin = frame.at;
+	const direction = {
+		x:frame.right.x * fx * MOUSE.at.x + frame.up.x * fy * MOUSE.at.y + frame.forward.x,
+		y:frame.right.y * fx * MOUSE.at.x + frame.up.y * fy * MOUSE.at.y + frame.forward.y,
+		z:frame.right.z * fx * MOUSE.at.x + frame.up.z * fy * MOUSE.at.y + frame.forward.z,
+	};
+
+	if (direction.z > -0.001) {
+		MOUSE.grid = {x:NaN, y:NaN};
+		queueUpdate();
+	} else {
+		const t = -origin.z / direction.z;
+		MOUSE.grid = {
+			x:Math.round(0.5 * (t * direction.x + origin.x)),
+			y:Math.round(0.5 * (t * direction.y + origin.y))
+		};
+		queueUpdate();
+	}
+}
+
+window.addEventListener('mousemove', function(evt){
+	evt.preventDefault();
+	setMouse(evt);
+	return false;
+});
+window.addEventListener('mousedown', function(evt){
+	evt.preventDefault();
+	setMouse(evt);
+	handleDown(evt);
+	return false;
+});
+
+window.addEventListener('mouseup', function(evt){
+	evt.preventDefault();
+	setMouse(evt);
+	handleUp();
+	return false;
+});
+
+
+function update(elapsed) {
+
+	{ //update camera to see whole board:
+		const size = {
+			x:parseInt(CANVAS.width),
+			y:parseInt(CANVAS.height)
+		};
+		CAMERA.aspect = size.x / size.y;
+		CAMERA.radius = 1000.0;
+
+		const frame = CAMERA.makeFrame();
+
+		let important = [];
+		for (let y = 1; y < BOARD.grid.length; ++y) {
+			for (let x = 1; x < BOARD.grid[y].length; ++x) {
+				let c00 = (BOARD.grid[y-1][x-1] !== ' ');
+				let c10 = (BOARD.grid[y][x-1] !== ' ');
+				let c01 = (BOARD.grid[y][x-1] !== ' ');
+				let c11 = (BOARD.grid[y][x] !== ' ');
+
+				if (c00 === c10 && c00 === c01 && c00 == c11) continue;
+
+				important.push({x:2*x, y:2*y, z:0.0});
+			}
+		}
+
+		let min = {x:0.0, y:0.0};
+		let max = {x:0.0, y:0.0};
+
+		important.forEach(function(pt){
+			min.x = Math.min(min.x, pt.x);
+			min.y = Math.min(min.y, pt.y);
+			max.x = Math.max(max.x, pt.x);
+			max.y = Math.max(max.y, pt.y);
+		});
+
+		CAMERA.target.x = 0.5 * (min.x + max.x);
+		CAMERA.target.y = 0.5 * (min.y + max.y);
+		CAMERA.target.z = 0.0;
+
+		let fy = Math.tan(0.5 * CAMERA.fovy / 180.0 * Math.PI);
+		let fx = fy * CAMERA.aspect;
+
+		let r = 1.0;
+
+		important.forEach(function(pt){
+			let x = dot(pt, frame.right) - dot(CAMERA.target, frame.right);
+			let y = dot(pt, frame.up) - dot(CAMERA.target, frame.up);
+			let z = dot(pt, frame.forward) - dot(CAMERA.target, frame.forward);
+
+			//want -fx < x / (z + r) < fx:
+			r = Math.max(r, Math.abs(x) / fx - z);
+			r = Math.max(r, Math.abs(y) / fy - z);
+		});
+
+		CAMERA.radius = r;
+	}
 
 	draw();
 
-	queueUpdate();
+	//queueUpdate();
 }
 
 function draw() {
@@ -136,6 +253,8 @@ function draw() {
 
 	const worldToClip = mul(cameraToClip, worldToCamera);
 
+	CAMERA.lastWorldToClip = worldToClip;
+
 	const prog = SHADERS.solid;
 	gl.useProgram(prog);
 
@@ -165,9 +284,10 @@ function draw() {
 		for (let x = 0; x < BOARD.grid[y].length; ++x) {
 			let c = BOARD.grid[y][x];
 			if (c === ' ') continue;
+			const boost = (x == MOUSE.grid.x && y == MOUSE.grid.y);
 			drawModel(MODELS["Grid.Square"], {x:2.0*x, y:2.0*y, z:0.0});
 			if (c !== '.') {
-				drawModel(MODELS["Tile." + c.toUpperCase()], {x:2.0*x, y:2.0*y, z:0.0});
+				drawModel(MODELS["Tile." + c.toUpperCase()], {x:2.0*x, y:2.0*y, z:(boost ? 0.5 : 0.0)});
 			}
 		}
 	}
