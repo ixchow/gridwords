@@ -23,33 +23,17 @@ SHADERS.load = function SHADERS_load() {
 			vColor = aColor;
 		}
 	`,`
+		varying highp vec3 vPosition;
+		varying mediump vec3 vNormal;
 		varying lowp vec4 vColor;
 		void main() {
-			gl_FragColor = vColor;
+			mediump vec3 n = normalize(vNormal);
+			mediump vec3 l = vec3(0.0, 0.0, 1.0);
+			mediump vec3 e = vec3(dot(n,l)*0.5+0.5);
+			gl_FragColor = vec4(e*vColor.rgb, vColor.a);
+			//gl_FragColor = vec4(vNormal * 0.5 + 0.5, 1.0);
 		}
 	`);
-
-	SHADERS.textured = initShaderProgram(gl,`
-		attribute vec2 aPosition;
-		attribute vec2 aTexCoord;
-		attribute vec4 aColor;
-		uniform mat4 uMVP;
-		varying vec2 vTexCoord;
-		varying vec4 vColor;
-		void main() {
-			gl_Position = uMVP * vec4(aPosition, 0.0, 1.0);
-			vTexCoord = aTexCoord;
-			vColor = aColor;
-		}
-	`,`
-		uniform sampler2D tex;
-		varying mediump vec2 vTexCoord;
-		varying lowp vec4 vColor;
-		void main() {
-			gl_FragColor = texture2D(tex, vTexCoord) * vColor;
-		}
-	`);
-
 };
 
 
@@ -68,6 +52,12 @@ function initShaderProgram(gl, vsSource, fsSource) {
 	const shaderProgram = gl.createProgram();
 	gl.attachShader(shaderProgram, vertexShader);
 	gl.attachShader(shaderProgram, fragmentShader);
+
+	gl.bindAttribLocation(shaderProgram, 0, "aPosition");
+	gl.bindAttribLocation(shaderProgram, 1, "aNormal");
+	gl.bindAttribLocation(shaderProgram, 2, "aColor");
+	gl.bindAttribLocation(shaderProgram, 3, "aTexCoord");
+
 	gl.linkProgram(shaderProgram);
 
 	// If creating the shader program failed, alert
