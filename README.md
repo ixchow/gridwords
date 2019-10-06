@@ -7,6 +7,8 @@ You start with a single word in the center of a grid and re-build it into new wo
 This game uses code from:
  - the MDN webGL tutorials:
    - https://threejs.org/build/three.min.js
+ - the 15-466-f17 notes, especially:
+   - http://graphics.cs.cmu.edu/courses/15-466-f17/notes/stencil-toy.html
  - the 15-466-f18 notes, especially:
    - http://graphics.cs.cmu.edu/courses/15-466-f18/notes/gl-helpers.js
    - http://graphics.cs.cmu.edu/courses/15-466-f18/notes/brdf-toy.html

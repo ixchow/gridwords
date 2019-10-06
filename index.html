@@ -22,10 +22,10 @@ body {
 	width:100vw;
 	height:100vh;
 }
-#prev, #next, #undo, #reset, #title {
+#prev, #next, #undo, #reset, #title, #message {
 	font-family: 'Cantata One', serif;
 	margin:0;
-	padding:1vh 3vh;
+	padding:1vh 2vh;
 	font-size:5vh;
 	line-height:5vh;
 
@@ -58,24 +58,24 @@ body {
 
 #prev {
 	left:0; top:0;
-	border-radius: 0 0 3vh 0;
+	border-radius: 0 0 2vh 0;
 }
 #next {
 	right:0; top:0;
-	border-radius: 0 0 0 3vh;
+	border-radius: 0 0 0 2vh;
 }
 #title {
 	position:static;
-	border-radius: 0 0 3vh 3vh;
+	border-radius: 0 0 2vh 2vh;
 }
 
 #undo {
 	right:0; bottom:0;
-	border-radius: 3vh 0 0 0;
+	border-radius: 2vh 0 0 0;
 }
 #reset {
 	left:0; bottom:0;
-	border-radius: 0 3vh 0 0;
+	border-radius: 0 2vh 0 0;
 }
 
 #topHolder {
@@ -88,6 +88,35 @@ body {
 	justify-content:space-around;
 }
 
+#message {
+	text-align:center;
+	font-size:4vh;
+	line-height:4.5vh;
+
+	border-radius: 2vh 2vh 0 0;
+
+	color:#fff;
+	background:#7778;
+}
+a {
+	color:#fff;
+}
+#messageHolder {
+	position:absolute;
+	left:0;
+	right:0;
+	bottom:0;
+	display:flex;
+	flex-flow:row;
+	justify-content:space-around;
+}
+
+.small {
+	font-size:2.5vh;
+	line-hieght:2.5vh;
+}
+
+
 </style>
 <link href="https://fonts.googleapis.com/css?family=Cantata+One&display=swap" rel="stylesheet">
 </head>
@@ -95,6 +124,9 @@ body {
 <canvas id="game"></canvas>
 <div id="topHolder">
 <div id="title">title</div>
+</div>
+<div id="messageHolder">
+<div id="message">message</div>
 </div>
 <div id="prev">Previous</div>
 <div id="next">Next</div>

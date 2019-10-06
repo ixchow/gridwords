@@ -13,9 +13,10 @@ const RESET = document.getElementById("reset");
 const PREV = document.getElementById("prev");
 const NEXT = document.getElementById("next");
 const TITLE = document.getElementById("title");
+const MESSAGE = document.getElementById("message");
 
 const CANVAS = document.getElementById("game");
-const gl = CANVAS.getContext("webgl");
+const gl = CANVAS.getContext("webgl", {stencil:true} );
 if (gl === null) {
 	alert("Unable to init webgl");
 	throw new Error("Init failed.");
@@ -27,8 +28,10 @@ SHADERS.load();
 
 function addLoad(fn) {
 	loading += 1;
+	TITLE.innerHTML = "Loading (" + loading + " remain)";
 	fn(function(){
 		loading -= 1;
+		TITLE.innerHTML = "Loading (" + loading + " remain)";
 		if (loading == 0) {
 			if (document.location.search.match(/^\?\d+/)) {
 				setLevel(parseInt(document.location.search.substr(1)));
@@ -62,7 +65,7 @@ function queueUpdate() {
 		if (!('prevTimestamp' in queueUpdate)) {
 			queueUpdate.prevTimestamp = timestamp;
 		}
-		const delta = timestamp = queueUpdate.prevTimestamp;
+		const delta = (timestamp - queueUpdate.prevTimestamp);
 		update(delta / 1000.0);
 		queueUpdate.prevTimestamp = timestamp;
 	});
@@ -107,8 +110,10 @@ const BOARD = {
 	}
 };
 
-function loadBoard(arr) {
+function loadBoard(arr, isSpecial) {
 	delete BOARD.lifted;
+
+	BOARD.special = (isSpecial ? true : false);
 
 	BOARD.height = arr.length;
 	BOARD.width = arr[0].length;
@@ -153,16 +158,14 @@ function loadBoard(arr) {
 
 	BOARD.important = [];
 
-	for (let y = -1; y < BOARD.height; ++y) {
-		for (let x = -1; x < BOARD.width; ++x) {
-			let c00 = (BOARD.get(x,y) !== null);
-			let c10 = (BOARD.get(x+1,y) !== null);
-			let c01 = (BOARD.get(x,y+1) !== null);
-			let c11 = (BOARD.get(x+1,y+1) !== null);
-
-			if (c00 == c10 && c00 == c01 && c00 == c11) continue;
-
-			BOARD.important.push({x:2*x+1, y:2*y+1, z:0.0});
+	for (let y = -1; y <= BOARD.height; ++y) {
+		for (let x = -1; x <= BOARD.width; ++x) {
+			if (BOARD.get(x-1,y) !== null
+			 || BOARD.get(x+1,y) !== null
+			 || BOARD.get(x,y-1) !== null
+			 || BOARD.get(x,y+1) !== null) {
+				BOARD.important.push({x:2*x, y:2*y, z:0.0});
+			}
 		}
 	}
 
@@ -188,8 +191,29 @@ function setLevel(N) {
 
 	if (history && history.replaceState) history.replaceState({},"","?" + CURRENT_LEVEL);
 	MAX_LEVEL = Math.max(MAX_LEVEL, CURRENT_LEVEL);
-	loadBoard(LEVELS[CURRENT_LEVEL].board);
-	TITLE.innerText = "❝" + LEVELS[N].title + "❞";
+	const special = (LEVELS[CURRENT_LEVEL].title === "");
+
+	loadBoard(LEVELS[CURRENT_LEVEL].board, special);
+	if (!special) {
+		TITLE.innerText = "❝" + LEVELS[CURRENT_LEVEL].title + "❞";
+		TITLE.style.visibility = "";
+		RESET.style.visibility = "";
+		UNDO.style.visibility = "";
+	} else {
+		//No title: special things happen:
+		TITLE.innerText = "❝" + LEVELS[CURRENT_LEVEL].title + "❞";
+		TITLE.style.visibility = "hidden";
+		RESET.style.visibility = "hidden";
+		UNDO.style.visibility = "hidden";
+		MAX_LEVEL = Math.max(MAX_LEVEL, Math.min(LEVELS.length-1, CURRENT_LEVEL+1));
+	}
+	if (LEVELS[CURRENT_LEVEL].message) {
+		MESSAGE.style.visibility = "";
+		MESSAGE.innerHTML = LEVELS[CURRENT_LEVEL].message;
+	} else {
+		MESSAGE.style.visibility = "hidden";
+		MESSAGE.innerHTML = "";
+	}
 	if (CURRENT_LEVEL == 0) {
 		PREV.classList.add("disabled");
 	} else {
@@ -296,6 +320,7 @@ MOUSE.getGrid = function MOUSE_getGrid() {
 }
 
 function handleDown(gridPos) {
+	if (BOARD.special) return;
 	if (!gridPos) return;
 	if (BOARD.lifted) return; //can't re-lift
 	const tile = BOARD.get(gridPos.x, gridPos.y);
@@ -316,9 +341,7 @@ function handleDown(gridPos) {
 		BOARD.lifted = tile;
 	}
 	if (BOARD.lifted) {
-		console.log(gridPos);
 		moveLifted(gridPos);
-		console.log(BOARD.lifted.targetPos.x, BOARD.lifted.targetPos.y);
 	}
 }
 
@@ -327,7 +350,6 @@ function moveLifted(gridPos) {
 	if (!BOARD.lifted) return;
 	if (BOARD.lifted.targetPos && BOARD.lifted.targetPos.x === gridPos.x && BOARD.lifted.targetPos.y === gridPos.y) return;
 	BOARD.lifted.targetPos = {x:gridPos.x, y:gridPos.y};
-	console.log("-->", BOARD.lifted.targetPos.x, BOARD.lifted.targetPos.y);
 	//TODO: check validity?
 	queueUpdate();
 }
@@ -524,6 +546,8 @@ function setLocked() {
 		});
 	});
 
+	if (BOARD.special) return;
+
 	for (let y = 0; y < BOARD.height; ++y) {
 		for (let x = 0; x < BOARD.width; ++x) {
 			function hasLetter(x,y) {
@@ -582,6 +606,14 @@ function setLocked() {
 
 }
 
+function inMessage(evt) {
+	let t = evt.target;
+	while (t) {
+		if (t === MESSAGE) return true;
+		t = t.parentElement;
+	}
+	return false;
+}
 
 window.addEventListener('mousemove', function(evt){
 	evt.preventDefault();
@@ -601,6 +633,11 @@ window.addEventListener('mousedown', function(evt){
 	return false;
 });
 window.addEventListener('click', function(evt){
+	if (inMessage(evt)) {
+		console.log("what");
+		return true;
+	}
+		
 	evt.preventDefault();
 	if (evt.target === PREV) {
 		prevLevel();
@@ -621,6 +658,7 @@ window.addEventListener('mouseup', function(evt){
 	return false;
 });
 
+let floatAmt = 0.0;
 
 function update(elapsed) {
 
@@ -666,9 +704,21 @@ function update(elapsed) {
 		CAMERA.radius = r;
 	}
 
-	draw();
+	floatAmt += elapsed / 15.0;
+	floatAmt -= Math.floor(floatAmt);
 
-	//queueUpdate();
+	let haveFloat = false;
+	BOARD.grid.forEach(function(row, y){
+		row.forEach(function(tile, x){
+			if (tile && tile.targetPos) haveFloat = true;
+		});
+	});
+
+	if (haveFloat) {
+		queueUpdate();
+	}
+
+	draw();
 }
 
 const MISC_BUFFER = gl.createBuffer();
@@ -681,7 +731,7 @@ function draw() {
 	gl.viewport(0,0,size.x,size.y);
 
 	if (loading) {
-		gl.clearColor(1.0,0.0,1.0, 1.0);
+		gl.clearColor(0.5,0.5,0.5, 1.0);
 		gl.clear(gl.COLOR_BUFFER_BIT);
 		//TODO: fancy loading bar or something.
 		return;
@@ -691,13 +741,6 @@ function draw() {
 	CAMERA.aspect = size.x / size.y;
 
 
-	gl.clearColor(0.2,0.2,0.2, 1.0);
-	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-	gl.enable(gl.DEPTH_TEST);
-	gl.depthFunc(gl.LESS);
-	gl.disable(gl.BLEND);
-
 	//build uniforms:
 	const u = {};
 
@@ -705,6 +748,11 @@ function draw() {
 	var eye = frame.at;
 
 	u.uEye = new Float32Array([eye.x, eye.y, eye.z]);
+	const toSun = normalize({x:-0.2, y:0.3, z:0.7});
+	u.uToSun = new Float32Array([toSun.x, toSun.y, toSun.z]);
+	u.uSkyEnergy = new Float32Array([0.9, 0.9, 0.95]);
+	u.uSunEnergy = new Float32Array([0.1, 0.1, 0.05]);
+
 	u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
 	u.uSaturate = new Float32Array([1.0]);
 
@@ -721,8 +769,6 @@ function draw() {
 
 	CAMERA.lastWorldToClip = worldToClip;
 
-	const prog = SHADERS.solid;
-	gl.useProgram(prog);
 
 	let arrowAttribs = [];
 
@@ -767,16 +813,31 @@ function draw() {
 		pt(1.0-ra, 0.0);
 	};
 
-	MODELS.bindBuffer();
 
-	function drawModel(model, at) {
-		const objectToWorld = new Float32Array([
-			1.0, 0.0, 0.0, 0.0,
-			0.0, 1.0, 0.0, 0.0,
-			0.0, 0.0, 1.0, 0.0,
-			at.x, at.y, at.z, 1.0
-		]);
+	let toDraw = [];
 
+	function drawModel(model, at, floatAmt) {
+		let objectToWorld;
+		if (floatAmt) {
+			objectToWorld = quat2mat4(
+				quatMul(
+					angleAxis(0.05*Math.sin(2.0 * 2.0 * Math.PI * floatAmt), 0.0, 1.0, 0.0),
+					angleAxis(0.03*Math.sin(5.0 * 2.0 * Math.PI * floatAmt), 0.0, 0.0, 1.0)
+				)
+			);
+			objectToWorld[12] = at.x;
+			objectToWorld[13] = at.y;
+			objectToWorld[14] = at.z;
+		} else {
+			objectToWorld = new Float32Array([
+				1.0, 0.0, 0.0, 0.0,
+				0.0, 1.0, 0.0, 0.0,
+				0.0, 0.0, 1.0, 0.0,
+				at.x, at.y, at.z, 1.0
+			]);
+		}
+
+		u.uLightToClip = worldToClip;
 		u.uObjectToClip = mul(worldToClip, objectToWorld);
 		u.uObjectToLight = objectToWorld;
 
@@ -787,8 +848,11 @@ function draw() {
 		]);
 		u.uNormalToLight = normalToWorld;
 
-		setUniforms(prog, u);
-		gl.drawArrays(model.type, model.start, model.count);
+		toDraw.push({
+			model:model,
+			u:Object.assign({}, u)
+		});
+
 	}
 
 	for (let y = 0; y < BOARD.height; ++y) {
@@ -800,9 +864,11 @@ function draw() {
 					u.uSaturate = new Float32Array([1.0]);
 				} else {
 					u.uSaturate = new Float32Array([0.0]);
+					u.uTint = new Float32Array([0.5, 0.5, 0.5, 0.25]);
 				}
 				drawModel(MODELS["Grid.Goal"], {x:2.0*x, y:2.0*y, z:0.0});
 				u.uSaturate = new Float32Array([1.0]);
+				u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
 			} else {
 				drawModel(MODELS["Grid.Square"], {x:2.0*x, y:2.0*y, z:0.0});
 			}
@@ -815,12 +881,14 @@ function draw() {
 					const target = BOARD.get(tile.targetPos.x, tile.targetPos.y);
 					let arrowColor;
 					if (target && !target.letter) {
-						u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
-						drawModel(m, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:z});
+						u.uTint = new Float32Array([0.0, 0.0, 0.0, 0.1]);
+						u.uSaturate = new Float32Array([1.2]);
+						drawModel(m, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:z}, floatAmt+0.7*x+0.3*y);
 						arrowColor = [0.1, 0.1, 0.07, 1.0];
 					} else {
 						arrowColor = [0.8, 0.2, 0.5, 1.0];
 					}
+					u.uSaturate = new Float32Array([1.0]);
 					u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
 
 					const h = 0.23
@@ -839,6 +907,85 @@ function draw() {
 		}
 	}
 
+
+	//HACK: don't need to draw shadow for plane, really.
+	MODELS["Plane"].shadow_count = 0;
+	drawModel(MODELS["Plane"], {x:0.5*BOARD.width,y:0.5*BOARD.height,z:0.0});
+
+	//--------- actually drawing now -----------
+
+	gl.clearColor(0.8,0.8,0.8, 1.0);
+	gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+
+	gl.enable(gl.DEPTH_TEST);
+	gl.depthFunc(gl.LESS);
+	gl.disable(gl.BLEND);
+
+	let prog;
+	//(ambient) light pass:
+
+	//draw scene (ambient):
+	prog = SHADERS.solid;
+	gl.useProgram(prog);
+	MODELS.bindBuffer();
+	toDraw.forEach(function(d){
+		if (d.model.count === 0) return;
+		d.u.uSkyEnergy = u.uSkyEnergy;
+		d.u.uSunEnergy = new Float32Array([0.0, 0.0, 0.0]);
+		setUniforms(prog, d.u);
+		gl.drawArrays(d.model.type, d.model.start, d.model.count);
+	});
+
+	//shadow pass:
+	gl.enable(gl.STENCIL_TEST);
+	gl.depthMask(false);
+
+	gl.depthFunc(gl.LESS);
+	gl.stencilFunc(gl.ALWAYS, 0x0, 0xff);
+	gl.stencilOpSeparate(gl.BACK, gl.KEEP, gl.INCR_WRAP, gl.KEEP); //increment when back face is behind geometry
+	gl.stencilOpSeparate(gl.FRONT, gl.KEEP, gl.DECR_WRAP, gl.KEEP); //decrement when front face is behind geometry
+	gl.colorMask(false, false, false, false);
+
+	//draw shadow volumes:
+	prog = SHADERS.shadow;
+	gl.useProgram(prog);
+	MODELS.bindShadowBuffer();
+	toDraw.forEach(function(d){
+		if (d.model.shadow_count === 0) return;
+		d.u.uSkyEnergy = new Float32Array([0.0, 0.0, 0.0]);
+		d.u.uSunEnergy = u.uSunEnergy;
+		setUniforms(prog, d.u);
+		gl.drawArrays(d.model.type, d.model.shadow_start, d.model.shadow_count);
+	});
+
+	gl.colorMask(true, true, true, true);
+
+	gl.enable(gl.BLEND);
+	gl.blendEquation(gl.FUNC_ADD);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+
+	gl.depthFunc(gl.EQUAL);
+	gl.stencilFunc(gl.EQUAL, 0x0, 0xff);
+	gl.stencilMask(0x00);
+
+	//draw scene (lit):
+	prog = SHADERS.solid;
+	gl.useProgram(prog);
+	MODELS.bindBuffer();
+	toDraw.forEach(function(d){
+		if (d.model.count === 0) return;
+		setUniforms(prog, d.u);
+		gl.drawArrays(d.model.type, d.model.start, d.model.count);
+	});
+
+	gl.stencilMask(0xff);
+
+	gl.disable(gl.BLEND);
+
+	gl.depthMask(true);
+	gl.disable(gl.STENCIL_TEST);
+
+	gl.disable(gl.DEPTH_TEST);
 	gl.enable(gl.BLEND);
 	gl.blendEquation(gl.FUNC_ADD);
 	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);

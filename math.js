@@ -3,6 +3,45 @@
 //Mostly from 15-466:
 // http://graphics.cs.cmu.edu/courses/15-466-f18/notes/brdf-toy.html
 
+//quaternion rotation:
+function angleAxis(angle, x,y,z) {
+	const axis = normalize({x:x, y:y, z:z});
+	const ca2 = Math.cos(angle/2);
+	const sa2 = Math.sin(angle/2);
+	return { x:sa2*axis.x, y:sa2*axis.y, z:sa2*axis.z, w:ca2 };
+}
+
+function quat2mat4(q) {
+	//Based on glm's gtx/quaternion.inl :
+
+	const ww = q.w*q.w;
+	const wx = q.w*q.x;
+	const wy = q.w*q.y;
+	const wz = q.w*q.z;
+	const xx = q.x*q.x;
+	const xy = q.x*q.y;
+	const xz = q.x*q.z;
+	const yy = q.y*q.y;
+	const yz = q.y*q.z;
+	const zz = q.z*q.z;
+
+	return new Float32Array([
+		1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy), 0.0,
+		2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx), 0.0,
+		2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy), 0.0,
+		0.0, 0.0, 0.0, 1.0
+	]);
+}
+
+function quatMul(q,r) {
+	let ret = cross(q,r);
+	ret.x += q.x*r.w + r.x*q.w;
+	ret.y += q.y*r.w + r.y*q.w;
+	ret.z += q.z*r.w + r.z*q.w;
+	ret.w = q.w*r.w - q.x*r.x - q.y*r.y - q.z*r.z;
+	return ret;
+}
+
 function mix(a, b, t) {
 	return {
 		x:(b.x - a.x) * t + a.x,
@@ -12,6 +51,13 @@ function mix(a, b, t) {
 }
 function dot(a, b) {
 	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+function sub(a, b) {
+	return {
+		x: a.x - b.x,
+		y: a.y - b.y,
+		z: a.z - b.z
+	};
 }
 function cross(a, b) {
 	return {
