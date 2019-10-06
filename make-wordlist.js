@@ -12,6 +12,9 @@ function gotList(err, data) {
 	data.split(/\s+/).forEach(function(word){
 		if (word.indexOf("'") !== -1) return;
 		if (!/^[a-z]*$/.test(word)) return;
+		if (word.length === 1) {
+			if (word !== "a") return;
+		}
 		gotWord(word);
 	});
 	loading -= 1;

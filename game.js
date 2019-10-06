@@ -7,6 +7,13 @@
 //and some helpers from on-forgetting:
 // https://github.com/ixchow/on-forgetting
 
+
+const UNDO = document.getElementById("undo");
+const RESET = document.getElementById("reset");
+const PREV = document.getElementById("prev");
+const NEXT = document.getElementById("next");
+const TITLE = document.getElementById("title");
+
 const CANVAS = document.getElementById("game");
 const gl = CANVAS.getContext("webgl");
 if (gl === null) {
@@ -57,27 +64,39 @@ function queueUpdate() {
 //-----------------------------
 
 const BOARD = {
-	grid:[
-		"             ",
-		"     ...     ",
-		" ........... ",
-		" ..nothing.. ",
-		" .....   ... ",
-		"    .......  ",
-		"     ...     ",
-		"             "
-	],
+	grid:[],
 	width:0,
 	height:0,
 	important:[],
+	history:[],
 	get:function BOARD_get(x,y) {
 		if (x < 0 || x >= this.width) return null;
 		if (y < 0 || y >= this.height) return null;
 		return this.grid[y][x];
+	},
+	pushHistory:function BOARD_pushHistory() {
+		if (this.lifted) return;
+		let val = JSON.stringify(this.grid);
+		if (this.history.length === 0 || val !== this.history[this.history.length-1]) {
+			this.history.push(val);
+		}
+	},
+	popHistory:function BOARD_popHistory() {
+		delete this.lifted;
+		this.grid = JSON.parse(this.history[this.history.length-1]);
+		if (this.history.length > 1) {
+			this.history.pop();
+		}
+	},
+	reset:function BOARD_reset() {
+		if (this.lifted) return;
+		this.grid = JSON.parse(this.history[0]);
 	}
 };
 
 function loadBoard(arr) {
+	delete BOARD.lifted;
+
 	BOARD.height = arr.length;
 	BOARD.width = arr[0].length;
 	for (let y = 0; y < arr.length; ++y) {
@@ -110,6 +129,8 @@ function loadBoard(arr) {
 			} else if (/^[A-Z]$/.test(arr[y][x])) {
 				row[x].letter = arr[y][x].toLowerCase();
 				row[x].locked = true;
+			} else if (arr[y][x] === '*') {
+				row[x].goal = true;
 			} else {
 				console.warn("Ignoring '" + arr[y][x] + "'");
 			}
@@ -131,25 +152,82 @@ function loadBoard(arr) {
 			BOARD.important.push({x:2*x+1, y:2*y+1, z:0.0});
 		}
 	}
+
+	BOARD.history = [];
+
+	BOARD.pushHistory();
 }
 
-loadBoard([
-	"     ...     ",
-	" ........... ",
-	" ..nothing.. ",
-	" .....   ... ",
-	"    .......  ",
-	"     ...     "
-]);
+
+let CURRENT_LEVEL = -1;
+let MAX_LEVEL = 0;
+
+function setLevel(N) {
+	if (N < 0 || N >= LEVELS.length) {
+		return;
+	}
+	if (CURRENT_LEVEL === N) {
+		return;
+	}
+	CURRENT_LEVEL = N;
+
+	if (history && history.replaceState) history.replaceState({},"","?" + CURRENT_LEVEL);
+	MAX_LEVEL = Math.max(MAX_LEVEL, CURRENT_LEVEL);
+	loadBoard(LEVELS[CURRENT_LEVEL].board);
+	TITLE.innerText = "❝" + LEVELS[N].title + "❞";
+	if (CURRENT_LEVEL == 0) {
+		PREV.classList.add("disabled");
+	} else {
+		PREV.classList.remove("disabled");
+	}
+	if (CURRENT_LEVEL == MAX_LEVEL) {
+		NEXT.classList.add("disabled");
+	} else {
+		NEXT.classList.remove("disabled");
+	}
+	console.log(MAX_LEVEL);
+}
+
+
+if (document.location.search.match(/^\?\d+/)) {
+	setLevel(parseInt(document.location.search.substr(1)));
+} else {
+	setLevel(0);
+}
+
+function prevLevel() {
+	if (CURRENT_LEVEL > 0) {
+		setLevel(CURRENT_LEVEL-1);
+		queueUpdate();
+	}
+}
+
+function nextLevel() {
+	if (CURRENT_LEVEL < MAX_LEVEL) {
+		setLevel(CURRENT_LEVEL+1);
+		queueUpdate();
+	}
+}
+
+function undo() {
+	BOARD.popHistory();
+	queueUpdate();
+}
+
+function reset() {
+	BOARD.pushHistory();
+	BOARD.reset();
+	queueUpdate();
+}
 
 
 const CAMERA = {
-	fovy:30.0,
+	fovy:15.0,
 	aspect:1.0,
 	near:10.0,
 	target:{x:0.0, y:0.0, z:0.0},
 	radius:30.0,
-	azimuth:0.02 * Math.PI,
+	azimuth:0.005 * Math.PI,
 	elevation:0.45 * Math.PI,
 	makeFrame:function() {
 		var ca = Math.cos(this.azimuth); var sa = Math.sin(this.azimuth);
@@ -212,6 +290,8 @@ function handleDown(gridPos) {
 	if (BOARD.lifted) return; //can't re-lift
 	const tile = BOARD.get(gridPos.x, gridPos.y);
 	if (tile === null) return;
+	BOARD.pushHistory();
+
 	if (tile.target) {
 		tile.targetPos = {x:gridPos.x, y:gridPos.y};
 		BOARD.lifted = tile;
@@ -219,7 +299,6 @@ function handleDown(gridPos) {
 		tile.targetPos = {x:gridPos.x, y:gridPos.y};
 		BOARD.lifted = tile;
 	}
-	//TODO: check validity?
 }
 
 function moveLifted(gridPos) {
@@ -370,8 +449,117 @@ function handleUp(gridPos) {
 				}
 			});
 		});
+		setLocked();
+	}
+
+	checkWin();
+}
+
+function checkWin() {
+	//check win condition
+	let goals = 0;
+	let filled = 0;
+	let up = 0;
+	BOARD.grid.forEach(function(row, y){
+		row.forEach(function(tile, x){
+			if (tile === null) return;
+			if (tile.goal) {
+				++goals;
+				if (tile.letter && !tile.locked && !tile.targetPos) {
+					++filled;
+				}
+			}
+			if (tile.targetPos) {
+				++up;
+			}
+		});
+	});
+	if (up === 0 && filled === goals) {
+		MAX_LEVEL = Math.max(MAX_LEVEL, CURRENT_LEVEL + 1);
+		NEXT.classList.remove("disabled");
 	}
 }
+
+function setLocked() {
+	let moving = false;
+	BOARD.grid.forEach(function(row, y){
+		row.forEach(function(tile, x){
+			if (tile === null) return;
+			if (tile.targetPos) {
+				moving = true;
+			}
+		});
+	});
+	if (moving) return;
+
+	//mark everything unlocked:
+	BOARD.grid.forEach(function(row, y){
+		row.forEach(function(tile, x){
+			if (tile === null) return;
+			delete tile.locked;
+			delete tile.xValid;
+			delete tile.yValid;
+		});
+	});
+
+	for (let y = 0; y < BOARD.height; ++y) {
+		for (let x = 0; x < BOARD.width; ++x) {
+			function hasLetter(x,y) {
+				const tile = BOARD.get(x,y);
+				return tile && tile.letter;
+			}
+			//check x:
+			if (!hasLetter(x-1,y)) {
+				let iter = new WORDS.Iterator();
+				let x2 = x;
+				while (hasLetter(x2,y)) {
+					iter.advance(BOARD.grid[y][x2].letter);
+					++x2;
+				}
+				if (iter.isWord()) {
+					for (let i = x; i < x2; ++i) {
+						BOARD.grid[y][i].xValid = iter.word;
+					}
+				} else if (iter.word.length === 1) {
+					BOARD.grid[y][x].xValid = 1;
+				}
+			}
+			//check y:
+			if (!hasLetter(x,y+1)) {
+				let iter = new WORDS.Iterator();
+				let y2 = y;
+				while (hasLetter(x,y2)) {
+					iter.advance(BOARD.grid[y2][x].letter);
+					--y2;
+				}
+				if (iter.isWord()) {
+					for (let i = y; i > y2; --i) {
+						BOARD.grid[i][x].yValid = iter.word;
+					}
+				} else if (iter.word.length === 1) {
+					BOARD.grid[y][x].yValid = 1;
+				}
+			}
+		}
+	}
+
+	//mark valid based on xValid and yValid:
+	BOARD.grid.forEach(function(row, y){
+		row.forEach(function(tile, x){
+			if (tile === null) return;
+			if (tile.letter === null) return;
+			if (tile.xValid && tile.yValid && (tile.xValid !== 1 || tile.yValid !== 1)) {
+				//great!
+			} else {
+				tile.locked = true;
+			}
+			//delete tile.xValid;
+			//delete tile.yValid;
+		});
+	});
+
+}
+
 
 window.addEventListener('mousemove', function(evt){
 	evt.preventDefault();
@@ -382,7 +570,22 @@ window.addEventListener('mousedown', function(evt){
 	evt.preventDefault();
 	setMouse(evt);
 
-	handleDown(MOUSE.getGrid());
+	if (evt.target === CANVAS) {
+		handleDown(MOUSE.getGrid());
+	}
+	return false;
+});
+window.addEventListener('click', function(evt){
+	evt.preventDefault();
+	if (evt.target === PREV) {
+		prevLevel();
+	} else if (evt.target === NEXT) {
+		nextLevel();
+	} else if (evt.target === UNDO) {
+		undo();
+	} else if (evt.target === RESET) {
+		reset();
+	}
 	return false;
 });
 
@@ -476,6 +679,7 @@ function draw() {
 
 	u.uEye = new Float32Array([eye.x, eye.y, eye.z]);
 	u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
+	u.uSaturate = new Float32Array([1.0]);
 
 	const worldToCamera = new Float32Array([
 		frame.right.x, frame.up.x,-frame.forward.x, 0.0,
@@ -519,7 +723,17 @@ function draw() {
 		for (let x = 0; x < BOARD.width; ++x) {
 			let tile = BOARD.grid[y][x];
 			if (tile === null) continue;
-			drawModel(MODELS["Grid.Square"], {x:2.0*x, y:2.0*y, z:0.0});
+			if (tile.goal) {
+				if (tile.letter && !tile.locked && !tile.targetPos) {
+					u.uSaturate = new Float32Array([1.0]);
+				} else {
+					u.uSaturate = new Float32Array([0.0]);
+				}
+				drawModel(MODELS["Grid.Goal"], {x:2.0*x, y:2.0*y, z:0.0});
+				u.uSaturate = new Float32Array([1.0]);
+			} else {
+				drawModel(MODELS["Grid.Square"], {x:2.0*x, y:2.0*y, z:0.0});
+			}
 			if (tile.letter) {
 				let m = MODELS["Tile." + tile.letter.toUpperCase()];
 				if (tile.targetPos) {
@@ -529,7 +743,13 @@ function draw() {
 					drawModel(m, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:0.5});
 					u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
 				} else {
+					if (tile.locked) {
+						u.uSaturate = new Float32Array([0.0]);
+						u.uTint = new Float32Array([0.7, 0.7, 0.7, 1.0]);
+					}
 					drawModel(m, {x:2.0*x, y:2.0*y, z:0.0});
+					u.uSaturate = new Float32Array([1.0]);
+					u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
 				}
 			}
 		}

@@ -1,7 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
 <style>
+@font-face {
+  font-family: 'Cantata One';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Cantata One'), local('CantataOne-Regular'), url('CantataOne-Regular.woff2') format('woff2');
+}
 body {
 	width:100vw;
 	height:100vh;
@@ -14,15 +22,91 @@ body {
 	width:100vw;
 	height:100vh;
 }
+#prev, #next, #undo, #reset, #title {
+	font-family: 'Cantata One', serif;
+	margin:0;
+	padding:1vh 3vh;
+	font-size:5vh;
+	line-height:5vh;
+
+	color:#eee;
+	background:#7778;
+}
+#prev, #next, #undo, #reset {
+	position:absolute;
+	cursor:pointer;
+}
+
+#title {
+	cursor:default;
+	padding:2vh 3vh 2vh 3vh;
+	color:#fffd;
+	background:#0002;
+	text-shadow: #0008 0 2px 0px;
+}
+
+#prev:hover, #next:hover, #undo:hover, #reset:hover {
+	color:#fff;
+	background:#8888;
+}
+
+
+#prev.disabled, #prev.disabled:hover, #next.disabled, #next.disabled:hover {
+	color:#888;
+	background:#6668;
+}
+
+#prev {
+	left:0; top:0;
+	border-radius: 0 0 3vh 0;
+}
+#next {
+	right:0; top:0;
+	border-radius: 0 0 0 3vh;
+}
+#title {
+	position:static;
+	border-radius: 0 0 3vh 3vh;
+}
+
+#undo {
+	right:0; bottom:0;
+	border-radius: 3vh 0 0 0;
+}
+#reset {
+	left:0; bottom:0;
+	border-radius: 0 3vh 0 0;
+}
+
+#topHolder {
+	position:absolute;
+	left:0;
+	right:0;
+	top:0;
+	display:flex;
+	flex-flow:row;
+	justify-content:space-around;
+}
+
 </style>
+<link href="https://fonts.googleapis.com/css?family=Cantata+One&display=swap" rel="stylesheet">
 </head>
 <body>
 <canvas id="game"></canvas>
+<div id="topHolder">
+<div id="title">title</div>
+</div>
+<div id="prev">Previous</div>
+<div id="next">Next</div>
+<div id="undo">Undo</div>
+<div id="reset">Reset</div>
+
 <script src="math.js"></script>
 <script src="gl-helpers.js"></script>
 <script src="models.js"></script>
 <script src="shaders.js"></script>
 <script src="words.js"></script>
+<script src="levels.js"></script>
 <script src="game.js"></script>
 </body>
 </html>
