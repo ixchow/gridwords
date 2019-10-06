@@ -27,13 +27,13 @@ SHADERS.load = function SHADERS_load() {
 		varying mediump vec3 vNormal;
 		varying lowp vec4 vColor;
 		void main() {
-			mediump vec3 albedo = vColor.rgb * uTint.rgb;
+			mediump vec3 albedo = mix(vColor.rgb, uTint.rgb, uTint.a);
 			//TODO: texture
 			albedo = mix(vec3(max(max(albedo.r,albedo.g),albedo.b)), albedo, uSaturate);
 			mediump vec3 n = normalize(vNormal);
 			mediump vec3 l = vec3(0.0, 0.0, 1.0);
 			mediump vec3 e = vec3(dot(n,l)*0.5+0.5);
-			gl_FragColor = vec4(e*albedo, vColor.a*uTint.a);
+			gl_FragColor = vec4(e*albedo, vColor.a);
 			//gl_FragColor = vec4(vNormal * 0.5 + 0.5, 1.0);
 		}
 	`);

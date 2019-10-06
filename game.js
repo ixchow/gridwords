@@ -29,6 +29,13 @@ function addLoad(fn) {
 	loading += 1;
 	fn(function(){
 		loading -= 1;
+		if (loading == 0) {
+			if (document.location.search.match(/^\?\d+/)) {
+				setLevel(parseInt(document.location.search.substr(1)));
+			} else {
+				setLevel(0);
+			}
+		}
 		queueUpdate();
 	});
 }
@@ -83,6 +90,12 @@ const BOARD = {
 	},
 	popHistory:function BOARD_popHistory() {
 		delete this.lifted;
+		//trim states that match current state:
+		this.current = JSON.stringify(this.grid);
+		while (this.history.length > 1 && this.history[this.history.length-1] === this.current) {
+			this.history.pop();
+		}
+		//grab next state:
 		this.grid = JSON.parse(this.history[this.history.length-1]);
 		if (this.history.length > 1) {
 			this.history.pop();
@@ -128,7 +141,7 @@ function loadBoard(arr) {
 				row[x].locked = false;
 			} else if (/^[A-Z]$/.test(arr[y][x])) {
 				row[x].letter = arr[y][x].toLowerCase();
-				row[x].locked = true;
+				row[x].goal = true;
 			} else if (arr[y][x] === '*') {
 				row[x].goal = true;
 			} else {
@@ -154,6 +167,8 @@ function loadBoard(arr) {
 	}
 
 	BOARD.history = [];
+
+	setLocked();
 
 	BOARD.pushHistory();
 }
@@ -185,15 +200,8 @@ function setLevel(N) {
 	} else {
 		NEXT.classList.remove("disabled");
 	}
-	console.log(MAX_LEVEL);
 }
 
-
-if (document.location.search.match(/^\?\d+/)) {
-	setLevel(parseInt(document.location.search.substr(1)));
-} else {
-	setLevel(0);
-}
 
 function prevLevel() {
 	if (CURRENT_LEVEL > 0) {
@@ -211,12 +219,14 @@ function nextLevel() {
 
 function undo() {
 	BOARD.popHistory();
+	setLocked();
 	queueUpdate();
 }
 
 function reset() {
 	BOARD.pushHistory();
 	BOARD.reset();
+	setLocked();
 	queueUpdate();
 }
 
@@ -292,20 +302,32 @@ function handleDown(gridPos) {
 	if (tile === null) return;
 	BOARD.pushHistory();
 
-	if (tile.target) {
-		tile.targetPos = {x:gridPos.x, y:gridPos.y};
-		BOARD.lifted = tile;
+	let source = null;
+	BOARD.grid.forEach(function(row){
+		row.forEach(function(tile){
+			if (tile && tile.targetPos && tile.targetPos.x === gridPos.x && tile.targetPos.y === gridPos.y) {
+				source = tile;
+			}
+		});
+	});
+	if (source) {
+		BOARD.lifted = source;
 	} else if (tile.letter && !tile.locked) {
-		tile.targetPos = {x:gridPos.x, y:gridPos.y};
 		BOARD.lifted = tile;
+	}
+	if (BOARD.lifted) {
+		console.log(gridPos);
+		moveLifted(gridPos);
+		console.log(BOARD.lifted.targetPos.x, BOARD.lifted.targetPos.y);
 	}
 }
 
 function moveLifted(gridPos) {
 	if (!gridPos) return;
 	if (!BOARD.lifted) return;
-	if (BOARD.lifted.targetPos.x === gridPos.x && BOARD.lifted.targetPos.y === gridPos.y) return;
+	if (BOARD.lifted.targetPos && BOARD.lifted.targetPos.x === gridPos.x && BOARD.lifted.targetPos.y === gridPos.y) return;
 	BOARD.lifted.targetPos = {x:gridPos.x, y:gridPos.y};
+	console.log("-->", BOARD.lifted.targetPos.x, BOARD.lifted.targetPos.y);
 	//TODO: check validity?
 	queueUpdate();
 }
@@ -564,6 +586,9 @@ function setLocked() {
 window.addEventListener('mousemove', function(evt){
 	evt.preventDefault();
 	setMouse(evt);
+	if (BOARD.lifted) {
+		moveLifted(MOUSE.getGrid());
+	}
 	return false;
 });
 window.addEventListener('mousedown', function(evt){
@@ -646,6 +671,8 @@ function update(elapsed) {
 	//queueUpdate();
 }
 
+const MISC_BUFFER = gl.createBuffer();
+
 function draw() {
 	const size = {
 		x:parseInt(CANVAS.width),
@@ -678,7 +705,7 @@ function draw() {
 	var eye = frame.at;
 
 	u.uEye = new Float32Array([eye.x, eye.y, eye.z]);
-	u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
+	u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
 	u.uSaturate = new Float32Array([1.0]);
 
 	const worldToCamera = new Float32Array([
@@ -696,6 +723,51 @@ function draw() {
 
 	const prog = SHADERS.solid;
 	gl.useProgram(prog);
+
+	let arrowAttribs = [];
+
+	function drawArrow(a, b, color) {
+		let along = { x:b.x-a.x, y:b.y-a.y, z:b.z-a.z };
+		let len = Math.sqrt(dot(along,along));
+		let norm = normalize(along);
+		let perp = normalize({ x:-along.y, y:along.x, z:0.0});
+
+		const ra = 0.6 / len;
+		function pt(amt, ofs) {
+			let a2 = Math.max(0.0, Math.min(1.0, (amt - ra) / (1 - 2.0*ra)));
+			let boost = (1.0 - (2.0 * (a2 - 0.5)) ** 2) * Math.min(1.0, 0.1 * len);
+			arrowAttribs.push(
+				along.x*amt+a.x + ofs*perp.x,
+				along.y*amt+a.y + ofs*perp.y,
+				along.z*amt+a.z + ofs*perp.z + boost,
+				...color
+			);
+		}
+		const ha = 0.3 / len;
+		const hr = 0.18;
+		const r = 0.05;
+
+		pt(ra, 0.0);
+		pt(ra, 0.0);
+		pt(ra + r / len, -r);
+		pt(ra + r / len,  r);
+
+		for (let s = 0; s < 5; ++s) {
+			let amt = ra+r + ((1.0-ra-ha) - (ra+r)) * (s+0.5)/5;
+			pt(amt, -r);
+			pt(amt, r);
+		}
+
+		pt(1.0-ra - ha, -r);
+		pt(1.0-ra - ha,  r);
+
+		pt(1.0-ra - ha, -hr);
+		pt(1.0-ra - ha,  hr);
+		pt(1.0-ra, 0.0);
+		pt(1.0-ra, 0.0);
+	};
+
+	MODELS.bindBuffer();
 
 	function drawModel(model, at) {
 		const objectToWorld = new Float32Array([
@@ -737,21 +809,88 @@ function draw() {
 			if (tile.letter) {
 				let m = MODELS["Tile." + tile.letter.toUpperCase()];
 				if (tile.targetPos) {
-					u.uTint = new Float32Array([0.5, 0.5, 0.5, 1.0]);
+					const z = (BOARD.lifted === tile ? 0.6 : 0.5);
+					u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.5]);
 					drawModel(m, {x:2.0*x, y:2.0*y, z:0.5});
-					u.uTint = new Float32Array([0.7, 0.7, 0.6, 1.0]);
-					drawModel(m, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:0.5});
-					u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
+					const target = BOARD.get(tile.targetPos.x, tile.targetPos.y);
+					let arrowColor;
+					if (target && !target.letter) {
+						u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
+						drawModel(m, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:z});
+						arrowColor = [0.1, 0.1, 0.07, 1.0];
+					} else {
+						arrowColor = [0.8, 0.2, 0.5, 1.0];
+					}
+					u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
+
+					const h = 0.23
+
+					drawArrow({x:2.0*x, y:2.0*y, z:0.5+h}, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:z+h}, arrowColor);
 				} else {
 					if (tile.locked) {
 						u.uSaturate = new Float32Array([0.0]);
-						u.uTint = new Float32Array([0.7, 0.7, 0.7, 1.0]);
+						u.uTint = new Float32Array([0.0, 0.0, 0.0, 0.3]);
 					}
 					drawModel(m, {x:2.0*x, y:2.0*y, z:0.0});
 					u.uSaturate = new Float32Array([1.0]);
-					u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
+					u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
 				}
 			}
 		}
 	}
+
+	gl.enable(gl.BLEND);
+	gl.blendEquation(gl.FUNC_ADD);
+	gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+	if (arrowAttribs.length) {
+		const objectToWorld = new Float32Array([
+			1.0, 0.0, 0.0, 0.0,
+			0.0, 1.0, 0.0, 0.0,
+			0.0, 0.0, 1.0, 0.0,
+			0.0, 0.0, 0.0, 1.0
+		]);
+
+		u.uObjectToClip = mul(worldToClip, objectToWorld);
+		u.uObjectToLight = objectToWorld;
+
+		const normalToWorld = new Float32Array([
+			objectToWorld[0], objectToWorld[1], objectToWorld[2],
+			objectToWorld[4], objectToWorld[5], objectToWorld[6],
+			objectToWorld[8], objectToWorld[9], objectToWorld[10]
+		]);
+		u.uNormalToLight = normalToWorld;
+
+		u.uSaturate = new Float32Array([1.0]);
+		u.uTint = new Float32Array([1.0, 1.0, 1.0, 0.0]);
+
+		setUniforms(prog, u);
+
+		//upload and draw arrow attribs:
+		gl.bindBuffer(gl.ARRAY_BUFFER, MISC_BUFFER);
+		gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arrowAttribs), gl.STREAM_DRAW);
+
+		const stride = 3*4+4*4;
+		//0 => Position
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+		//1 => Normal
+		gl.disableVertexAttribArray(1);
+		gl.vertexAttrib3f(1, 0.0, 0.0, 1.0);
+		//gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3*4);
+		//2 => Color
+		gl.enableVertexAttribArray(2);
+		gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 3*4);
+		//3 => TexCoord
+		gl.disableVertexAttribArray(3);
+		gl.vertexAttrib2f(3, 0.0, 0.0);
+		//gl.vertexAttribPointer(3, 2, gl.FLOAT, false, stride, 3*4+3*4+4*1);
+
+		gl.drawArrays(gl.TRIANGLE_STRIP, 0, arrowAttribs.length/(stride/4));
+	}
+
+	gl.disable(gl.BLEND);
+
 }
+
+

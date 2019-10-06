@@ -57,23 +57,26 @@ function load_models(name, callback) {
 		//----- upload data to GPU -----
 		let buffer = gl.createBuffer();
 
-		gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-		gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+		MODELS.bindBuffer = function() {
 
-		const stride = 3*4+3*4+4*1+2*4;
+			gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+			gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
 
-		//0 => Position
-		gl.enableVertexAttribArray(0);
-		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
-		//1 => Normal
-		gl.enableVertexAttribArray(1);
-		gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3*4);
-		//2 => Color
-		gl.enableVertexAttribArray(2);
-		gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, stride, 3*4+3*4);
-		//3 => TexCoord
-		gl.enableVertexAttribArray(3);
-		gl.vertexAttribPointer(3, 2, gl.FLOAT, false, stride, 3*4+3*4+4*1);
+			const stride = 3*4+3*4+4*1+2*4;
+
+			//0 => Position
+			gl.enableVertexAttribArray(0);
+			gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+			//1 => Normal
+			gl.enableVertexAttribArray(1);
+			gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3*4);
+			//2 => Color
+			gl.enableVertexAttribArray(2);
+			gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, stride, 3*4+3*4);
+			//3 => TexCoord
+			gl.enableVertexAttribArray(3);
+			gl.vertexAttribPointer(3, 2, gl.FLOAT, false, stride, 3*4+3*4+4*1);
+		};
 
 		callback();
 	});

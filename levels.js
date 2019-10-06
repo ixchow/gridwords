@@ -9,11 +9,21 @@ const LEVELS = [
 	},
 	{	title:"Order Matters",
 		board:[
-			".nothing.",
+			".nothiNg.",
 			".........",
-			"......*.."
+			"...*.....",
 		]
 	},
+	{	title:"Embrace and Extend",
+		board:[
+			".....*.",
+			".......",
+			"notHing",
+			".......",
+			"ca*....",
+		]
+	},
+
 	{	title:"Pivotal Role",
 		board:[
 			".nothing.",
