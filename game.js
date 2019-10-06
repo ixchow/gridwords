@@ -255,85 +255,112 @@ function handleUp(gridPos) {
 	//okay, no longer lifted:
 	delete BOARD.lifted;
 
-	//do a sweep for valid words to drop:
-	while (true) {
-		const text = new Array(BOARD.height);
-		for (let y = 0; y < BOARD.height; ++y) {
-			text[y] = new Array(BOARD.width);
-			for (let x = 0; x < BOARD.width; ++x) {
-				text[y][x] = null;
-			}
-		}
+	//will either drop *everything* or drop *nothing*.
+	//Will drop *everything* if every new word is:
+	// (a) supported (== 4-neighbor connected to unlocked tile)
+	// (b) valid (== x and y chains are both words)
 
+	//fill in text to make it easier to sweep:
+	const text = new Array(BOARD.height);
+	for (let y = 0; y < BOARD.height; ++y) {
+		text[y] = new Array(BOARD.width);
+		for (let x = 0; x < BOARD.width; ++x) {
+			text[y][x] = null;
+		}
+	}
+
+	BOARD.grid.forEach(function(row, y){
+		row.forEach(function(tile, x){
+			if (tile === null) return;
+			if (tile.letter && !tile.targetPos) {
+				console.assert(text[y][x] === null);
+				text[y][x] = tile.letter;
+			} else if (tile.targetPos) {
+				const tx = tile.targetPos.x;
+				const ty = tile.targetPos.y;
+				console.assert(text[ty][tx] === null);
+				text[ty][tx] = tile.letter.toUpperCase();
+			}
+		});
+	});
+
+	//do "supported" with flood-fill:
+	const supported = new Array(BOARD.height);
+	for (let y = 0; y < BOARD.height; ++y) {
+		supported[y] = new Array(BOARD.width);
+	}
+	{
+		const todo = [];
+		function support(x,y) {
+			if (x < 0 || x >= BOARD.width || y < 0 || y >= BOARD.height) return;
+			if (!text[y][x]) return;
+			if (supported[y][x]) return;
+			supported[y][x] = true;
+			todo.push({x:x-1,y:y});
+			todo.push({x:x+1,y:y});
+			todo.push({x:x,y:y-1});
+			todo.push({x:x,y:y+1});
+		}
 		BOARD.grid.forEach(function(row, y){
 			row.forEach(function(tile, x){
-				if (tile === null) return;
-				if (tile.letter && !tile.targetPos) {
-					console.assert(text[y][x] === null);
-					text[y][x] = tile.letter;
-				} else if (tile.targetPos) {
-					const tx = tile.targetPos.x;
-					const ty = tile.targetPos.y;
-					console.assert(text[ty][tx] === null);
-					text[ty][tx] = tile.letter.toUpperCase();
+				if (tile && tile.letter && !tile.targetPos && !tile.locked) {
+					support(x,y);
 				}
 			});
 		});
-
-		let bestWord = {
-			x:-1, y:-1, dx:0, dy:0, word:"", value:0
-		};
-		for (let y = 0; y < BOARD.height; ++y) {
-			for (let x = 0; x < BOARD.width; ++x) {
-				if (text[y][x] === null) continue;
-				function tryWord(dx,dy) {
-					let iter = new WORDS.Iterator();
-					let x2 = x;
-					let y2 = y;
-					let value = 0;
-					while (x2 < BOARD.width && y2 < BOARD.height) {
-						const c = text[y2][x2];
-						if (c === null) break;
-						iter.advance(c.toLowerCase());
-						if (c.toUpperCase() === c) value += 1000;
-						if (c.toLowerCase() === c) value += 1;
-						if (iter.isWord() && (value % 1000 != 0) && (value >= 1000) && value > bestWord.value) {
-							bestWord.x = x;
-							bestWord.y = y;
-							bestWord.dx = dx;
-							bestWord.dy = dy;
-							bestWord.word = iter.word;
-							bestWord.value = value;
-						}
-						if (!iter.isPrefix()) break;
-						x2 += dx;
-						y2 += dy;
-					}
-				}
-				tryWord(1,0);
-				tryWord(0,-1);
+		while (todo.length) {
+			let at = todo.shift();
+			support(at.x, at.y);
+		}
+	}
+	let allSupported = true;
+	for (let y = 0; y < BOARD.height; ++y) {
+		for (let x = 0; x < BOARD.width; ++x) {
+			if (text[y][x] && text[y][x].toUpperCase() == text[y][x] && !supported[y][x]) {
+				allSupported = false;
 			}
 		}
-		if (bestWord.value === 0) {
-			break;
-		}
-		//set down everything in best word:
-		console.log(bestWord.word);
-		const min = {
-			x:Math.min(bestWord.x, bestWord.x + bestWord.dx * (bestWord.word.length-1)),
-			y:Math.min(bestWord.y, bestWord.y + bestWord.dy * (bestWord.word.length-1)),
-		};
-		const max = {
-			x:Math.max(bestWord.x, bestWord.x + bestWord.dx * (bestWord.word.length-1)),
-			y:Math.max(bestWord.y, bestWord.y + bestWord.dy * (bestWord.word.length-1)),
-		};
+	}
 
+
+	//do "valid" with WORDS:
+	let allValid = true;
+	for (let y = 0; y < BOARD.height; ++y) {
+		for (let x = 0; x < BOARD.width; ++x) {
+			function tryWord(dx,dy) {
+				let x1 = x;
+				let y1 = y;
+				while (x1-dx >= 0 && x1-dx < BOARD.width && y1-dy >= 0 && y1-dy < BOARD.height && text[y1-dy][x1-dx] !== null) {
+					x1 -= dx;
+					y1 -= dy;
+				}
+
+				let x2 = x1;
+				let y2 = y1;
+
+				let iter = new WORDS.Iterator();
+				while (x2 >= 0 && x2 < BOARD.width && y2 >= 0 && y2 < BOARD.height) {
+					const c = text[y2][x2];
+					if (c === null) break;
+					iter.advance(c.toLowerCase());
+					x2 += dx;
+					y2 += dy;
+				}
+				console.assert(iter.word.length >= 1);
+				return (iter.word.length === 1 || iter.isWord());
+			}
+			if (text[y][x] && text[y][x].toUpperCase() === text[y][x] && !(tryWord(1,0) && tryWord(0,-1))) {
+				//not valid
+				allValid = false;
+			}
+		}
+	}
+
+	if (allSupported && allValid) {
 		BOARD.grid.forEach(function(row, y){
 			row.forEach(function(tile, x){
 				if (tile === null) return;
-				if (tile.targetPos
-					&& tile.targetPos.x >= min.x && tile.targetPos.x <= max.x
-					&& tile.targetPos.y >= min.y && tile.targetPos.y <= max.y) {
+				if (tile.targetPos) {
 					const target = BOARD.get(tile.targetPos.x, tile.targetPos.y);
 					console.assert(target);
 					console.assert(!target.letter);
@@ -344,11 +371,6 @@ function handleUp(gridPos) {
 			});
 		});
 	}
-
-	//TODO: check validity?
-	//TODO: anything that's valid gets dropped
-	//TODO: anything that's invalid [off board?] gets reset
-	//TODO: anything that's maybe valid remains
 }
 
 window.addEventListener('mousemove', function(evt){
