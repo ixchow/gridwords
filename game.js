@@ -14,13 +14,20 @@ if (gl === null) {
 	throw new Error("Init failed.");
 }
 
-let loading = true;
+let loading = 0;
 
 SHADERS.load();
-MODELS.load(function(){
-	loading = false;
-	queueUpdate();
-});
+
+function addLoad(fn) {
+	loading += 1;
+	fn(function(){
+		loading -= 1;
+		queueUpdate();
+	});
+}
+
+addLoad(MODELS.load);
+addLoad(WORDS.load);
 
 //onresize resizes the canvas's contents based on its external size:
 function resized() {
@@ -59,8 +66,82 @@ const BOARD = {
 		"    .......  ",
 		"     ...     ",
 		"             "
-	]
+	],
+	width:0,
+	height:0,
+	important:[],
+	get:function BOARD_get(x,y) {
+		if (x < 0 || x >= this.width) return null;
+		if (y < 0 || y >= this.height) return null;
+		return this.grid[y][x];
+	}
 };
+
+function loadBoard(arr) {
+	BOARD.height = arr.length;
+	BOARD.width = arr[0].length;
+	for (let y = 0; y < arr.length; ++y) {
+		BOARD.width = Math.max(BOARD.width, arr[y].length);
+	}
+
+	BOARD.grid = new Array(BOARD.height);
+	for (let y = 0; y < arr.length; ++y) {
+		const row = new Array(BOARD.width);
+		for (let x = 0; x < BOARD.width; ++x) {
+			row[x] = null;
+		}
+		for (let x = 0; x < arr[y].length; ++x) {
+			if (arr[y][x] === ' ') {
+				continue;
+			}
+			row[x] = {
+				pts:[
+					{x:2*x-1, y:2*y-1},
+					{x:2*x+1, y:2*y-1},
+					{x:2*x+1, y:2*y+1},
+					{x:2*x-1, y:2*y+1}
+				]
+			};
+			if (arr[y][x] === '.') {
+				//nothing to do.
+			} else if (/^[a-z]$/.test(arr[y][x])) {
+				row[x].letter = arr[y][x];
+				row[x].locked = false;
+			} else if (/^[A-Z]$/.test(arr[y][x])) {
+				row[x].letter = arr[y][x].toLowerCase();
+				row[x].locked = true;
+			} else {
+				console.warn("Ignoring '" + arr[y][x] + "'");
+			}
+		}
+		BOARD.grid[BOARD.height-1-y] = row;
+	}
+
+	BOARD.important = [];
+
+	for (let y = -1; y < BOARD.height; ++y) {
+		for (let x = -1; x < BOARD.width; ++x) {
+			let c00 = (BOARD.get(x,y) !== null);
+			let c10 = (BOARD.get(x+1,y) !== null);
+			let c01 = (BOARD.get(x,y+1) !== null);
+			let c11 = (BOARD.get(x+1,y+1) !== null);
+
+			if (c00 == c10 && c00 == c01 && c00 == c11) continue;
+
+			BOARD.important.push({x:2*x+1, y:2*y+1, z:0.0});
+		}
+	}
+}
+
+loadBoard([
+	"     ...     ",
+	" ........... ",
+	" ..nothing.. ",
+	" .....   ... ",
+	"    .......  ",
+	"     ...     "
+]);
+
 
 const CAMERA = {
 	fovy:30.0,
@@ -91,7 +172,6 @@ const CAMERA = {
 
 const MOUSE = {
 	at:{x:NaN, y:NaN},
-	grid:{x:NaN, y:NaN}
 };
 
 function setMouse(evt) {
@@ -100,7 +180,10 @@ function setMouse(evt) {
 		x:(evt.clientX - rect.left) / rect.width * 2.0 - 1.0,
 		y:(evt.clientY - rect.bottom) / -rect.height * 2.0 - 1.0
 	};
+	queueUpdate();
+}
 
+MOUSE.getGrid = function MOUSE_getGrid() {
 	//solve posn on plane -- raycast from camera:
 	const frame = CAMERA.makeFrame();
 	const fy = Math.tan(0.5 * CAMERA.fovy / 180.0 * Math.PI);
@@ -114,16 +197,158 @@ function setMouse(evt) {
 	};
 
 	if (direction.z > -0.001) {
-		MOUSE.grid = {x:NaN, y:NaN};
-		queueUpdate();
+		return null;
 	} else {
 		const t = -origin.z / direction.z;
-		MOUSE.grid = {
+		return {
 			x:Math.round(0.5 * (t * direction.x + origin.x)),
 			y:Math.round(0.5 * (t * direction.y + origin.y))
 		};
-		queueUpdate();
 	}
+}
+
+function handleDown(gridPos) {
+	if (!gridPos) return;
+	if (BOARD.lifted) return; //can't re-lift
+	const tile = BOARD.get(gridPos.x, gridPos.y);
+	if (tile === null) return;
+	if (tile.target) {
+		tile.targetPos = {x:gridPos.x, y:gridPos.y};
+		BOARD.lifted = tile;
+	} else if (tile.letter && !tile.locked) {
+		tile.targetPos = {x:gridPos.x, y:gridPos.y};
+		BOARD.lifted = tile;
+	}
+	//TODO: check validity?
+}
+
+function moveLifted(gridPos) {
+	if (!gridPos) return;
+	if (!BOARD.lifted) return;
+	if (BOARD.lifted.targetPos.x === gridPos.x && BOARD.lifted.targetPos.y === gridPos.y) return;
+	BOARD.lifted.targetPos = {x:gridPos.x, y:gridPos.y};
+	//TODO: check validity?
+	queueUpdate();
+}
+
+function handleUp(gridPos) {
+	if (!BOARD.lifted) return; //can't drop if not lifted
+	moveLifted(gridPos);
+
+	//drop anything invalid, already hope, or that would conflict:
+	const target = BOARD.get(BOARD.lifted.targetPos.x, BOARD.lifted.targetPos.y);
+	if (target === null || target === BOARD.lifted || target.letter) {
+		delete BOARD.lifted.targetPos;
+	}
+
+	//drop anything overlapped:
+	if (BOARD.lifted.targetPos) {
+		BOARD.grid.forEach(function(row){
+			row.forEach(function(tile){
+				if (tile && tile !== BOARD.lifted && tile.targetPos && tile.targetPos.x === BOARD.lifted.targetPos.x && tile.targetPos.y === BOARD.lifted.targetPos.y) {
+					delete tile.targetPos;
+				}
+			});
+		});
+	}
+
+	//okay, no longer lifted:
+	delete BOARD.lifted;
+
+	//do a sweep for valid words to drop:
+	while (true) {
+		const text = new Array(BOARD.height);
+		for (let y = 0; y < BOARD.height; ++y) {
+			text[y] = new Array(BOARD.width);
+			for (let x = 0; x < BOARD.width; ++x) {
+				text[y][x] = null;
+			}
+		}
+
+		BOARD.grid.forEach(function(row, y){
+			row.forEach(function(tile, x){
+				if (tile === null) return;
+				if (tile.letter && !tile.targetPos) {
+					console.assert(text[y][x] === null);
+					text[y][x] = tile.letter;
+				} else if (tile.targetPos) {
+					const tx = tile.targetPos.x;
+					const ty = tile.targetPos.y;
+					console.assert(text[ty][tx] === null);
+					text[ty][tx] = tile.letter.toUpperCase();
+				}
+			});
+		});
+
+		let bestWord = {
+			x:-1, y:-1, dx:0, dy:0, word:"", value:0
+		};
+		for (let y = 0; y < BOARD.height; ++y) {
+			for (let x = 0; x < BOARD.width; ++x) {
+				if (text[y][x] === null) continue;
+				function tryWord(dx,dy) {
+					let iter = new WORDS.Iterator();
+					let x2 = x;
+					let y2 = y;
+					let value = 0;
+					while (x2 < BOARD.width && y2 < BOARD.height) {
+						const c = text[y2][x2];
+						if (c === null) break;
+						iter.advance(c.toLowerCase());
+						if (c.toUpperCase() === c) value += 1000;
+						if (c.toLowerCase() === c) value += 1;
+						if (iter.isWord() && (value % 1000 != 0) && (value >= 1000) && value > bestWord.value) {
+							bestWord.x = x;
+							bestWord.y = y;
+							bestWord.dx = dx;
+							bestWord.dy = dy;
+							bestWord.word = iter.word;
+							bestWord.value = value;
+						}
+						if (!iter.isPrefix()) break;
+						x2 += dx;
+						y2 += dy;
+					}
+				}
+				tryWord(1,0);
+				tryWord(0,-1);
+			}
+		}
+		if (bestWord.value === 0) {
+			break;
+		}
+		//set down everything in best word:
+		console.log(bestWord.word);
+		const min = {
+			x:Math.min(bestWord.x, bestWord.x + bestWord.dx * (bestWord.word.length-1)),
+			y:Math.min(bestWord.y, bestWord.y + bestWord.dy * (bestWord.word.length-1)),
+		};
+		const max = {
+			x:Math.max(bestWord.x, bestWord.x + bestWord.dx * (bestWord.word.length-1)),
+			y:Math.max(bestWord.y, bestWord.y + bestWord.dy * (bestWord.word.length-1)),
+		};
+
+		BOARD.grid.forEach(function(row, y){
+			row.forEach(function(tile, x){
+				if (tile === null) return;
+				if (tile.targetPos
+					&& tile.targetPos.x >= min.x && tile.targetPos.x <= max.x
+					&& tile.targetPos.y >= min.y && tile.targetPos.y <= max.y) {
+					const target = BOARD.get(tile.targetPos.x, tile.targetPos.y);
+					console.assert(target);
+					console.assert(!target.letter);
+					target.letter = tile.letter;
+					delete tile.letter;
+					delete tile.targetPos;
+				}
+			});
+		});
+	}
+
+	//TODO: check validity?
+	//TODO: anything that's valid gets dropped
+	//TODO: anything that's invalid [off board?] gets reset
+	//TODO: anything that's maybe valid remains
 }
 
 window.addEventListener('mousemove', function(evt){
@@ -134,14 +359,15 @@ window.addEventListener('mousemove', function(evt){
 window.addEventListener('mousedown', function(evt){
 	evt.preventDefault();
 	setMouse(evt);
-	handleDown(evt);
+
+	handleDown(MOUSE.getGrid());
 	return false;
 });
 
 window.addEventListener('mouseup', function(evt){
 	evt.preventDefault();
 	setMouse(evt);
-	handleUp();
+	handleUp(MOUSE.getGrid());
 	return false;
 });
 
@@ -158,24 +384,10 @@ function update(elapsed) {
 
 		const frame = CAMERA.makeFrame();
 
-		let important = [];
-		for (let y = 1; y < BOARD.grid.length; ++y) {
-			for (let x = 1; x < BOARD.grid[y].length; ++x) {
-				let c00 = (BOARD.grid[y-1][x-1] !== ' ');
-				let c10 = (BOARD.grid[y][x-1] !== ' ');
-				let c01 = (BOARD.grid[y][x-1] !== ' ');
-				let c11 = (BOARD.grid[y][x] !== ' ');
-
-				if (c00 === c10 && c00 === c01 && c00 == c11) continue;
-
-				important.push({x:2*x, y:2*y, z:0.0});
-			}
-		}
-
 		let min = {x:0.0, y:0.0};
 		let max = {x:0.0, y:0.0};
 
-		important.forEach(function(pt){
+		BOARD.important.forEach(function(pt){
 			min.x = Math.min(min.x, pt.x);
 			min.y = Math.min(min.y, pt.y);
 			max.x = Math.max(max.x, pt.x);
@@ -191,7 +403,7 @@ function update(elapsed) {
 
 		let r = 1.0;
 
-		important.forEach(function(pt){
+		BOARD.important.forEach(function(pt){
 			let x = dot(pt, frame.right) - dot(CAMERA.target, frame.right);
 			let y = dot(pt, frame.up) - dot(CAMERA.target, frame.up);
 			let z = dot(pt, frame.forward) - dot(CAMERA.target, frame.forward);
@@ -241,6 +453,7 @@ function draw() {
 	var eye = frame.at;
 
 	u.uEye = new Float32Array([eye.x, eye.y, eye.z]);
+	u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
 
 	const worldToCamera = new Float32Array([
 		frame.right.x, frame.up.x,-frame.forward.x, 0.0,
@@ -280,14 +493,22 @@ function draw() {
 		gl.drawArrays(model.type, model.start, model.count);
 	}
 
-	for (let y = 0; y < BOARD.grid.length; ++y) {
-		for (let x = 0; x < BOARD.grid[y].length; ++x) {
-			let c = BOARD.grid[y][x];
-			if (c === ' ') continue;
-			const boost = (x == MOUSE.grid.x && y == MOUSE.grid.y);
+	for (let y = 0; y < BOARD.height; ++y) {
+		for (let x = 0; x < BOARD.width; ++x) {
+			let tile = BOARD.grid[y][x];
+			if (tile === null) continue;
 			drawModel(MODELS["Grid.Square"], {x:2.0*x, y:2.0*y, z:0.0});
-			if (c !== '.') {
-				drawModel(MODELS["Tile." + c.toUpperCase()], {x:2.0*x, y:2.0*y, z:(boost ? 0.5 : 0.0)});
+			if (tile.letter) {
+				let m = MODELS["Tile." + tile.letter.toUpperCase()];
+				if (tile.targetPos) {
+					u.uTint = new Float32Array([0.5, 0.5, 0.5, 1.0]);
+					drawModel(m, {x:2.0*x, y:2.0*y, z:0.5});
+					u.uTint = new Float32Array([0.7, 0.7, 0.6, 1.0]);
+					drawModel(m, {x:2.0*tile.targetPos.x, y:2.0*tile.targetPos.y, z:0.5});
+					u.uTint = new Float32Array([1.0, 1.0, 1.0, 1.0]);
+				} else {
+					drawModel(m, {x:2.0*x, y:2.0*y, z:0.0});
+				}
 			}
 		}
 	}

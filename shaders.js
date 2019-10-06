@@ -4,8 +4,6 @@ const SHADERS = {
 };
 
 SHADERS.load = function SHADERS_load() {
-	console.log("SHADERS.load");
-	
 	SHADERS.solid = initShaderProgram(gl,`
 		attribute vec4 aPosition;
 		attribute vec3 aNormal;
@@ -23,6 +21,7 @@ SHADERS.load = function SHADERS_load() {
 			vColor = aColor;
 		}
 	`,`
+		uniform lowp vec4 uTint;
 		varying highp vec3 vPosition;
 		varying mediump vec3 vNormal;
 		varying lowp vec4 vColor;
@@ -30,7 +29,7 @@ SHADERS.load = function SHADERS_load() {
 			mediump vec3 n = normalize(vNormal);
 			mediump vec3 l = vec3(0.0, 0.0, 1.0);
 			mediump vec3 e = vec3(dot(n,l)*0.5+0.5);
-			gl_FragColor = vec4(e*vColor.rgb, vColor.a);
+			gl_FragColor = vec4(e*vColor.rgb*uTint.rgb, vColor.a*uTint.a);
 			//gl_FragColor = vec4(vNormal * 0.5 + 0.5, 1.0);
 		}
 	`);
